@@ -3,20 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tonalli — Gestión Energética Inteligente</title>
+  <title>Tonalli</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;0,9..144,900&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
   <link rel="stylesheet" href="web/css/style.css">
+  <link rel="shortcut icon" href="web/assets/logo.png">
 </head>
 <body>
  
   <header>
     <nav>
       <a href="index.html" class="nav-logo">
-        <div class="logo-icon"><i class="fa-solid fa-sun"></i></div>
-        <span class="logo-text">Tonalli</span>
+        <img src="web/assets/imagotipo-14.png" alt="Tonalli Logo" class="navbar-logo-img">
       </a>
       <ul class="nav-links">
         <li><a href="#problematica">Problema</a></li>
@@ -32,6 +32,7 @@
   <main>
     <section class="hero">
       <div class="hero-inner">
+        
         <div class="hero-text">
           <span class="hero-badge"><i class="fa-solid fa-leaf"></i> Proyecto Sostenible</span>
           <h1 class="hero-title">Eficiencia energética<br><em>en tus manos.</em></h1>
@@ -40,9 +41,17 @@
           </p>
           <div class="hero-btns">
             <a href="#" class="btn-primary"><i class="fa-solid fa-download"></i> Descargar APK</a>
-            <a href="manual.html" class="btn-outline"><i class="fa-solid fa-book"></i> Ver Manual</a>
+            <a href="/web/html/manual.html" class="btn-outline"><i class="fa-solid fa-book"></i> Ver Manual</a>
           </div>
         </div>
+
+        <div class="hero-image">
+          <div class="phone-mockup">
+            <div class="phone-notch"></div>
+            <img src="web/assets/logo.png" alt="App Tonalli Pantalla" class="phone-screen-logo">
+          </div>
+        </div>
+
       </div>
     </section>
  
@@ -109,17 +118,24 @@
         </div>
         <div class="grid-3">
           <div class="card">
-            <div class="card-icon"><i class="fa-solid fa-city"></i></div>
+            <div class="card-icon ods-icon-container">
+              <img src="web/assets/ods11.png" alt="ODS 11: Ciudades y Comunidades Sostenibles" class="ods-img">
+            </div>
             <h3>ODS 11: Ciudades Sostenibles</h3>
             <p>Fomentamos hogares que consumen energía de forma inteligente, reduciendo la carga en el Sistema Eléctrico Nacional.</p>
           </div>
           <div class="card">
-            <div class="card-icon"><i class="fa-solid fa-recycle"></i></div>
-            <h3>ODS 12: Producción Responsable</h3>
+            <div class="card-icon ods-icon-container">
+              <img src="web/assets/ods12.png" alt="ODS 12: Producción y Consumo Responsables" class="ods-img">
+            </div>
+            <h3>ODS 12: Consumo Responsable</h3>
             <p>Educamos al usuario para aprovechar la luz natural y optimizar sus dispositivos, combatiendo el desperdicio energético diario.</p>
           </div>
+          
           <div class="card">
-            <div class="card-icon"><i class="fa-solid fa-cloud-sun"></i></div>
+            <div class="card-icon ods-icon-container">
+              <img src="web/assets/ods13.png" alt="ODS 13: Acción por el Clima" class="ods-img">
+            </div>
             <h3>ODS 13: Acción por el Clima</h3>
             <p>Traducimos la energía ahorrada (kWh) a kilogramos de Dióxido de Carbono (CO₂) evitados utilizando factores de emisión reales (0.527 kg/kWh).</p>
           </div>
@@ -129,7 +145,7 @@
   </main>
  
   <footer>
-    <p>&copy; 2026 <strong>Tonalli</strong> — Proyecto Green-Tech de Eficiencia Energética.<br>Construido con Flutter y Dart.</p>
+    <p>&copy; 2026 <strong>Tonalli</strong> — Concurso de creatividad.<br>Construido con Flutter y Dart por parte de los alumnos <strong>Imelda Chavez y Jesus Fonseca</strong>.</p>
   </footer>
 </body>
 </html>
