@@ -3,8 +3,8 @@
 Documento de referencia de **todas** las fórmulas de la aplicación: qué calcula,
 cómo lo calcula, de dónde sale cada constante y qué error tiene cada supuesto.
 
-Estado: fases A, B y F aplicadas. Las secciones marcadas *(fase D)* y
-*(fase C)* describen limitaciones vigentes que se atienden más adelante.
+Estado: fases A, B, C y F aplicadas. Las secciones marcadas *(fase D)* describen
+limitaciones vigentes que se atienden más adelante.
 
 ---
 
@@ -17,11 +17,13 @@ Estado: fases A, B y F aplicadas. Las secciones marcadas *(fase D)* y
 | $W$ | Energía | Wh, kWh | Potencia × tiempo. Es lo que factura CFE |
 | $t$ | Tiempo | s, h | |
 | $f_u$ | Factor de uso | adimensional, 0–1 | Ciclo de trabajo |
+| $r$ | Residuo de calibración | kWh/mes | Consumo real menos estimado |
+| $\alpha$ | Corrección de ciclo | adimensional, ≤1 | Ajuste a cargas cicladas |
 | $p$ | Precio de la energía | \$/kWh | Varía por bloque |
 
 **La distinción que más importa en esta app:** watt y watt-hora no son lo mismo.
 El watt es un ritmo; el watt-hora es una cantidad acumulada. Un foco de 40 W
-encendido dos horas no «gastó 40 W», gastó **80 Wh**. La versión anterior de
+encendido dos horas no «gastó 40 W», gastó **80 Wh**. La versión original de
 Tonalli calculaba bien pero rotulaba mal: mostraba «W» donde tenía Wh. Toda la
 interfaz actual dice Wh, y cambia a kWh en cuanto el número pasa de 1000.
 
@@ -37,23 +39,31 @@ $$1\ \text{kWh} = 1000\ \text{Wh}$$
            │                                     │
      media móvil (§2.1)                  energía por aparato (§3.1)
            │                                     │
-     nivel de luz (§2.2)                 consumo mensual (§3.2)
+     nivel de luz (§2.2)                 consumo bruto (§3.2)
            │                                     │
-     histéresis (§2.3)                  motor tarifario CFE (§4)
-           │                                ├── recibo bimestral (§4.4)
-      notificación                          ├── precio marginal (§4.5)
-                                            └── riesgo DAC (§6)
-                                                     │
-     CRONÓMETRO ──── energía ahorrada (§5.2) ────────┤
-                            │                        │
-                            ├──── dinero (§5.3) ◄────┘
-                            ├──── CO₂ (§7)
-                            └──── solar (§8)
+     histéresis (§2.3)                          │◄──── RECIBOS DE CFE
+           │                                     │      (consumo real)
+      notificación                        calibración (§4)
+           │                                     │
+     resumen diario ────┐               consumo calibrado
+                        │                        │
+                        │              motor tarifario CFE (§5)
+                        │                 ├── recibo bimestral (§5.4)
+                        │                 ├── precio marginal (§5.5)
+                        │                 └── riesgo DAC (§7) ◄── recibos
+                        │                          │
+     CRONÓMETRO ── energía ahorrada (§6.2) ────────┤
+                        │                          │
+                        ├───── dinero (§6.3) ◄─────┘
+                        ├───── CO₂ (§8)
+                        ├───── solar (§9)
+                        └───── histórico SQLite (§10)
 ```
 
-Hay un solo punto de acoplamiento entre las dos ramas: el **precio marginal**.
-El catálogo de aparatos determina en qué bloque tarifario cae el hogar, y ese
-bloque es el que valúa cada kWh ahorrado.
+Hay dos puntos de acoplamiento. El **precio marginal**: el catálogo determina en
+qué bloque tarifario cae el hogar, y ese bloque valúa cada kWh ahorrado. Y los
+**recibos**: son la única fuente de consumo real, y de ellos salen tanto la
+calibración del catálogo como el criterio DAC.
 
 ---
 
@@ -165,7 +175,7 @@ solo trabaja una fracción de ese tiempo.
 
 **Ejemplo — refrigerador de 250 W conectado 24 h:**
 
-$$W_{\text{mes}} = \frac{250 \cdot 24 \cdot 0.35}{1000} \cdot 30 = 63\ \text{kWh/mes}$$
+$$W_{\text{mes}} = \frac{250 \cdot 24 \cdot 0.35}{1000} \cdot 30 = 63.0\ \text{kWh/mes}$$
 
 Sin factor de uso daban 180 kWh/mes, o **360 kWh bimestrales de un solo aparato**
 — más que el recibo completo de una casa promedio en Tijuana.
@@ -173,34 +183,165 @@ Sin factor de uso daban 180 kWh/mes, o **360 kWh bimestrales de un solo aparato*
 Una lectura útil del factor: de las 24 h conectado, el refrigerador consume el
 equivalente a $24 \times 0.35 = 8.4$ h a plena potencia.
 
-### 3.2 Consumo total
+### 3.2 Consumo bruto
 
-$$W_{\text{hogar}} = \sum_{i \in \text{activos}} \frac{P_i \cdot h_i \cdot f_{u,i}}{1000} \cdot d$$
+$$W_{\text{bruto}} = \sum_{i \in \text{activos}} \frac{P_i \cdot h_i \cdot f_{u,i}}{1000} \cdot d$$
 
-Solo entran los aparatos con el interruptor activado. Para el recibo:
-
-$$W_{\text{bimestre}} = W_{\text{hogar}} \times 2$$
+Solo entran los aparatos con el interruptor activado. «Bruto» significa: lo que
+declara el catálogo, antes de contrastarlo con la realidad.
 
 ### 3.3 Error residual
 
-El factor de uso baja el error de ~450 % a un orden de 30 %, pero sigue siendo un
-promedio. El ciclo real de un refrigerador depende de la temperatura ambiente,
-de qué tan lleno esté y de su antigüedad: en agosto en Tijuana trabaja bastante
-más que en enero.
+El factor de uso baja el error de un orden de 450 % a un orden de 30 %, pero
+sigue siendo un promedio. El ciclo real de un refrigerador depende de la
+temperatura ambiente, de qué tan lleno esté y de su antigüedad: en agosto en
+Tijuana trabaja bastante más que en enero.
 
-La corrección definitiva (opción B, pendiente) es capturar el **kWh/año de la
-etiqueta de eficiencia energética** —FIDE/CONUEE en México, Energy Guide en
-Estados Unidos—, que es una cifra medida bajo protocolo normado
-(NOM-015-ENER para refrigeradores, NOM-023-ENER para aire acondicionado) y ya
-incorpora el ciclo real:
-
-$$W_{\text{mes}} = \frac{W_{\text{año, etiqueta}}}{12}$$
+Ese error residual es justo lo que ataca la calibración de la §4.
 
 ---
 
-## 4. Motor tarifario CFE
+## 4. Calibración contra recibos reales
 
-### 4.1 Temporada
+Los recibos de CFE que el usuario captura son la **única fuente de consumo real**
+de toda la app. Todo lo demás es estimación.
+
+### 4.1 El residuo
+
+Cada recibo se normaliza a un mes de 30 días, porque los periodos facturados no
+tienen la misma duración:
+
+$$W_{\text{real}} = W_{\text{recibo}} \cdot \frac{30}{\text{días facturados}}$$
+
+$$r = W_{\text{real}} - W_{\text{bruto}}$$
+
+### 4.2 Por qué NO un factor único
+
+Lo obvio sería calcular $k = W_{\text{real}} / W_{\text{bruto}}$ y multiplicar
+todo por $k$. No se hace, y la razón importa.
+
+Ese escalar tendría que absorber **cinco errores distintos a la vez**: ciclos de
+trabajo mal supuestos, horas mal declaradas, aparatos no registrados, cargas
+fantasma en espera, y variación estacional. Es una ecuación con cinco incógnitas.
+Y hace algo peor que ser impreciso: si el usuario olvidó registrar el boiler,
+$k$ le echa la culpa al refrigerador. Las cifras por aparato quedan infladas de
+forma silenciosa — justo las que el usuario mira para decidir qué cambiar.
+
+La corrección es **asimétrica**:
+
+### 4.3 Subestimación ($r > 0$): carga no identificada
+
+El faltante no se reparte. Se registra como un renglón propio del catálogo,
+«Consumo no identificado»:
+
+$$W_{\text{calibrado}} = W_{\text{bruto}} + r$$
+
+Con eso pasan tres cosas a la vez. El total cuadra con el recibo, que es lo que
+necesitan el aviso DAC y el precio marginal. Las cifras por aparato **no se
+tocan**, así que siguen significando lo que dicen. Y el hueco se vuelve
+información accionable: un residuo grande está diciendo «faltan aparatos en tu
+catálogo», que es un diagnóstico, no un defecto.
+
+### 4.4 Sobreestimación ($r < 0$): corrección del ciclo
+
+Aquí sí se corrigen parámetros, pero solo el más incierto. Que un LED de 12 W
+esté 5 h es un dato duro; que el compresor de un refrigerador trabaje el 35 % del
+tiempo es una suposición. Así que el ajuste cae **solo sobre las cargas
+cicladas**:
+
+$$W_{\text{ciclado}} = \sum_{i\ \text{ciclados}} \frac{P_i h_i f_{u,i}}{1000} d$$
+
+$$\alpha = \text{clamp}\left(1 + \frac{r}{W_{\text{ciclado}}},\ 0.4,\ 1.0\right)
+\qquad f_u' = f_u \cdot \alpha$$
+
+### 4.5 Los tres candados
+
+Sin estas guardas la calibración haría más daño que bien.
+
+**Candado 1 — rango de razón.** Si
+$W_{\text{real}} / W_{\text{bruto}} \notin [0.4,\ 2.5]$, no se calibra y se
+avisa. Una razón de 4 no significa que el refrigerador consuma el cuádruple;
+significa que el catálogo está prácticamente vacío.
+
+**Candado 2 — integridad del catálogo.** Un recibo se descarta si algún aparato
+fue creado o modificado **dentro** de su periodo facturado. Comparar el consumo
+de esos meses contra la estimación de hoy daría un residuo falso. Esto es lo que
+justifica las columnas `creado_en` y `modificado_en` de la tabla `aparatos`.
+
+**Candado 3 — media ponderada.** No se usa el último recibo, sino todos los
+válidos de la temporada, con más peso a los recientes:
+
+$$w_i = \frac{1}{1 + m_i} \qquad
+\bar{r} = \frac{\sum_i r_i \cdot w_i}{\sum_i w_i}$$
+
+donde $m_i$ son los meses transcurridos desde el fin del periodo $i$. Un bimestre
+con visitas en casa o dos semanas de vacaciones no debe arrastrar la calibración
+por sí solo.
+
+### 4.6 Separación por temporada
+
+Con un solo recibo no se puede distinguir «mi refrigerador trabaja más de lo
+supuesto» de «en agosto todo trabaja más». Por eso la calibración se calcula
+**por separado** para verano y fuera de verano, clasificando cada recibo por el
+punto medio de su periodo:
+
+$$t_{\text{medio}} = t_{\text{inicio}} + \frac{\text{días}}{2}$$
+
+Esto cierra directamente la limitación estacional que quedaba abierta en §3.3.
+Con tres recibos ya hay señal; con seis se cubre un año.
+
+### 4.7 Ejemplo numérico
+
+Catálogo declarado:
+
+| Aparato | $P$ | $h$ | $f_u$ | kWh/mes |
+|---|---|---|---|---|
+| Refrigerador | 250 W | 24 | 0.35 | 63.0 |
+| Televisión | 120 W | 4 | 1.00 | 14.4 |
+| Focos LED (4×12 W) | 48 W | 5 | 1.00 | 7.2 |
+| Laptop | 65 W | 6 | 1.00 | 11.7 |
+| **Bruto** | | | | **96.3** |
+
+Recibo real: 258 kWh en 62 días.
+
+$$W_{\text{real}} = 258 \cdot \frac{30}{62} = 124.8\ \text{kWh/mes}$$
+$$r = 124.8 - 96.3 = +28.5\ \text{kWh/mes}$$
+$$\text{razón} = \frac{124.8}{96.3} = 1.30 \in [0.4,\ 2.5]\ \checkmark$$
+
+Como $r > 0$, se registra como consumo no identificado:
+
+$$W_{\text{calibrado}} = 96.3 + 28.5 = 124.8\ \text{kWh/mes}$$
+
+**Caso inverso.** Si el recibo hubiera sido de 80 kWh/mes:
+
+$$r = 80 - 96.3 = -16.3, \qquad W_{\text{ciclado}} = 63.0$$
+$$\alpha = 1 - \frac{16.3}{63.0} = 0.741 \Rightarrow f_u' = 0.35 \cdot 0.741 = 0.259$$
+
+Refrigerador corregido: $63.0 \times 0.741 = 46.7$ kWh/mes. Las cargas constantes
+quedan intactas en 33.3, y el total da $46.7 + 33.3 = 80.0$ kWh/mes. Cierra.
+
+### 4.8 Lo que la calibración **no** resuelve
+
+Los recibos arreglan el **agregado**, no la **atribución**. Después de calibrar
+se sabe que la casa consume 124.8 kWh/mes y la proyección lo refleja, pero sigue
+sin saberse con certeza cuánto de eso es el refrigerador.
+
+Para eso hacen falta las etiquetas de eficiencia energética (FIDE/CONUEE en
+México, Energy Guide en Estados Unidos), que dan el consumo anual medido bajo
+protocolo normado —NOM-015-ENER para refrigeradores, NOM-023-ENER para aire
+acondicionado— y ya incorporan el ciclo real:
+
+$$W_{\text{mes}} = \frac{W_{\text{año, etiqueta}}}{12}$$
+
+Recibos y etiquetas no compiten, se complementan: capturando la etiqueta de los
+dos aparatos grandes, el residuo se calcula sobre un remanente mucho más chico y
+mejor portado.
+
+---
+
+## 5. Motor tarifario CFE
+
+### 5.1 Temporada
 
 CFE define seis meses consecutivos de verano por localidad. La app usa
 mayo–octubre por defecto (Baja California) y es configurable.
@@ -209,7 +350,7 @@ $$\text{verano} = (\text{mes} \ge m_{\text{inicio}}) \wedge (\text{mes} \le m_{\
 
 Verano y fuera de verano tienen **topes de bloque y precios distintos**.
 
-### 4.2 Estructura de bloques
+### 5.2 Estructura de bloques
 
 Fuera de verano, todas las tarifas 1A–1F (y la tarifa 1 todo el año) comparten la
 misma estructura: básico 0–75 kWh/mes, intermedio 76–140, excedente 141+.
@@ -229,7 +370,7 @@ En verano cada tarifa abre sus bloques según el clima de la localidad:
 Las cifras son kWh **mensuales** que cubre cada bloque; lo que sobra cae en
 excedente, que no tiene tope.
 
-### 4.3 Reparto del consumo
+### 5.3 Reparto del consumo
 
 Los topes son mensuales, así que se escalan por la duración del periodo:
 
@@ -239,13 +380,11 @@ donde $L_j$ es el tope mensual del bloque $j$ y $m$ el número de meses (1 para
 una proyección mensual, 2 para el recibo bimestral). El consumo se reparte de
 abajo hacia arriba:
 
-$$
-W_j = \min\left(C_j,\ W_{\text{total}} - \sum_{k<j} W_k\right)
-$$
+$$W_j = \min\left(C_j,\ W_{\text{total}} - \sum_{k<j} W_k\right)$$
 
 $$\text{Energía} = \sum_j W_j \cdot p_j$$
 
-### 4.4 Del subtotal al total
+### 5.4 Del subtotal al total
 
 $$
 \begin{align}
@@ -263,7 +402,7 @@ $$
   copia de su recibo. No es un detalle menor: en el recibo de referencia
   representa más de un cuarto del total.
 
-### 4.5 Precio promedio contra precio marginal
+### 5.5 Precio promedio contra precio marginal
 
 $$p_{\text{promedio}} = \frac{\text{Total}}{W_{\text{total}}}
 \qquad
@@ -272,7 +411,7 @@ p_{\text{marginal}} = p_{j^*} \cdot \left(1 + \tfrac{\text{IVA}\%}{100}\right)$$
 donde $j^*$ es el último bloque alcanzado. Son dos números muy distintos y sirven
 para cosas distintas: el promedio explica el recibo, el marginal valúa el ahorro.
 
-### 4.6 Ejemplo completo — recibo real de Tijuana
+### 5.6 Ejemplo completo — recibo real de Tijuana
 
 Datos: tarifa 1A, verano, 258 kWh en un bimestre (18 jun – 19 ago 2026).
 
@@ -299,9 +438,9 @@ Los dos precios:
 $$p_{\text{promedio}} = \frac{397.09}{258} = \$1.539/\text{kWh}$$
 $$p_{\text{marginal}} = 1.171 \times 1.08 = \$1.265/\text{kWh}$$
 
-Para comparar: la versión anterior de la app usaba \$0.98/kWh plano para todo.
+Para comparar: la versión original de la app usaba \$0.98/kWh plano para todo.
 
-### 4.7 Precios de referencia y su vigencia
+### 5.7 Precios de referencia y su vigencia
 
 Los precios de CFE cambian mes a mes por un factor de actualización. Como la app
 es offline, la estrategia es: **estructura de bloques empotrada** (es estable,
@@ -313,7 +452,7 @@ Solo la tarifa **1A en verano** está marcada como verificada, porque sus precio
 salen de un recibo real. Las demás muestran una insignia naranja pidiendo que se
 capturen. Referencia empotrada: agosto 2026.
 
-### 4.8 Dos tarifas, a propósito
+### 5.8 Dos tarifas, a propósito
 
 La app guarda por separado la **tarifa configurada** y la **tarifa con la que Mi
 Hogar calculó su proyección**. Cambiar de tarifa no reescribe la proyección sin
@@ -323,9 +462,9 @@ inmediato, porque ahí no hay un cálculo previo que preservar.
 
 ---
 
-## 5. Sesión de ahorro
+## 6. Sesión de ahorro
 
-### 5.1 Tiempo
+### 6.1 Tiempo
 
 $$t = \text{now} - t_{\text{inicio}}$$
 
@@ -334,7 +473,7 @@ timers de Dart cuando la app pasa a segundo plano y puede matar el proceso: un
 contador incrementado cada segundo perdería tiempo de forma no determinista y una
 sesión larga se perdería completa. El `Timer` de la app solo refresca la pantalla.
 
-### 5.2 Energía no consumida
+### 6.2 Energía no consumida
 
 $$W_{\text{ahorrado}} = P_{\text{alumbrado}} \cdot \frac{t_{\text{segundos}}}{3600}\quad [\text{Wh}]$$
 
@@ -342,7 +481,7 @@ $P_{\text{alumbrado}}$ es la suma de la potencia de los focos que el usuario
 apaga, configurable (40 W por defecto). El divisor 3600 convierte segundos a
 horas: el resultado es energía.
 
-### 5.3 Dinero
+### 6.3 Dinero
 
 $$\$_{\text{ahorrado}} = \frac{W_{\text{ahorrado}}}{1000} \cdot p_{\text{marginal}}$$
 
@@ -354,41 +493,66 @@ ahorro real por un factor que puede ser de 3 o 4 — y eso juega en contra del
 propósito de la app, porque le dice al usuario que ahorró mucho menos de lo que
 ahorró.
 
-Si el usuario todavía no registra aparatos, no se sabe en qué bloque cae y se usa
-el **intermedio** como supuesto, con un aviso en pantalla.
+El bloque se determina con el consumo **calibrado** (§4), no con el bruto. Si el
+usuario todavía no registra aparatos, se usa el bloque intermedio como supuesto,
+con un aviso en pantalla.
 
-**Ejemplo:** foco de 40 W apagado 3 h, hogar del §4.6.
+**Ejemplo:** foco de 40 W apagado 3 h, hogar del §5.6.
 
 $$W = 40 \cdot 3 = 120\ \text{Wh} = 0.12\ \text{kWh}$$
 $$\$ = 0.12 \times 1.265 = \$0.152$$
 
+### 6.4 Congelado del precio
+
+Cada sesión guarda el $p_{\text{marginal}}$ vigente en el momento en que
+terminó. Cambiar de tarifa después **no reescribe** lo ya ahorrado: el histórico
+queda auditable y las gráficas no se deforman retroactivamente.
+
 ---
 
-## 6. Riesgo de tarifa DAC
+## 7. Riesgo de tarifa DAC
 
-$$r = \frac{W_{\text{hogar}}}{L_{\text{DAC}}}$$
-
-| $r$ | Estado |
-|---|---|
-| $r < 0.85$ | Seguro |
-| $0.85 \le r < 1.0$ | Cerca del límite |
-| $r \ge 1.0$ | Rebasado |
-
-**Lo que DAC no es.** No depende del monto del recibo. La versión anterior de la
-app comparaba el costo contra \$1,500 — unidad equivocada, además de ventana
+**Lo que DAC no es.** No depende del monto del recibo. La versión original de la
+app comparaba el costo contra \$1,500 — unidad equivocada además de ventana
 equivocada. CFE reclasifica el servicio cuando el **promedio móvil de los últimos
-12 meses** de consumo mensual rebasa el límite de alto consumo de la tarifa de la
-localidad.
+12 meses** de consumo mensual rebasa el límite de alto consumo de la tarifa.
 
-$$\bar{W}_{12} = \frac{1}{12}\sum_{i=1}^{12} W_i > L_{\text{DAC}} \Rightarrow \text{DAC}$$
+### 7.1 Promedio móvil real
 
-*(fase C)* Hoy la app compara la **proyección** del mes contra el límite, y lo
-dice explícitamente en el aviso. El promedio real de 12 meses requiere histórico
-y llega con la base de datos.
+A partir de los recibos capturados, normalizando por días para que periodos de
+distinta duración pesen lo que deben:
+
+$$\bar{W}_{12} = \frac{\sum_i W_i}{\left(\sum_i d_i\right)/30}$$
+
+donde $W_i$ son los kWh facturados y $d_i$ los días de cada recibo dentro de los
+últimos 12 meses.
+
+La app marca este número como **real** solo cuando
+$\left(\sum d_i\right)/30 \ge 6$ meses. Por debajo de medio año la muestra no
+representa lo que CFE evalúa sobre doce, así que cae a la proyección del catálogo
+calibrado y lo declara en pantalla.
+
+### 7.2 Evaluación
+
+$$\rho = \frac{\bar{W}_{12}}{L_{\text{DAC}}}$$
+
+| $\rho$ | Estado |
+|---|---|
+| $\rho < 0.85$ | Seguro |
+| $0.85 \le \rho < 1.0$ | Cerca del límite |
+| $\rho \ge 1.0$ | Rebasado |
+
+**Ejemplo** con el recibo de referencia (258 kWh en 62 días, tarifa 1A):
+
+$$\bar{W}_{12} = \frac{258}{62/30} = 124.8\ \text{kWh/mes}
+\qquad \rho = \frac{124.8}{300} = 0.42 \Rightarrow \text{seguro}$$
+
+Con un solo recibo la cobertura es de 2.1 meses, así que la app lo presenta como
+proyección, no como promedio real.
 
 ---
 
-## 7. Emisiones evitadas
+## 8. Emisiones evitadas
 
 $$m_{\text{CO}_2} = \frac{W_{\text{ahorrado}}}{1000} \cdot FE$$
 
@@ -398,14 +562,14 @@ Es el **Factor de Emisión del Sistema Eléctrico Nacional 2024**, publicado por
 Comisión Reguladora de Energía y notificado por SEMARNAT en el aviso del 28 de
 febrero de 2025, para reporte al Registro Nacional de Emisiones.
 
-Equivale a 0.444 tCO₂e/MWh. La versión anterior usaba 0.527, que corresponde a
+Equivale a 0.444 tCO₂e/MWh. La versión original usaba 0.527, que corresponde a
 años previos: el factor baja conforme entra generación renovable a la red.
 
 **Ejemplo:** 0.12 kWh ahorrados → $0.12 \times 0.444 = 0.053$ kg CO₂e.
 
 ---
 
-## 8. Dimensionamiento solar
+## 9. Dimensionamiento solar
 
 $$N_{\text{paneles}} = \left\lceil \frac{W_{\text{día}}}{\text{HSP} \cdot P_{\text{panel}} \cdot PR} \right\rceil$$
 
@@ -419,13 +583,13 @@ $$N_{\text{paneles}} = \left\lceil \frac{W_{\text{día}}}{\text{HSP} \cdot P_{\t
 conversión del inversor, caída de eficiencia del módulo por temperatura,
 resistencia del cableado, suciedad sobre el vidrio y desviación de la orientación
 óptima. Sin él, el arreglo queda alrededor de **25 % subdimensionado** — la
-fórmula anterior de la app lo omitía.
+fórmula original de la app lo omitía.
 
-**Ejemplo** con el hogar del §4.6 (129 kWh/mes):
+**Ejemplo** con el hogar calibrado del §4.7 (124.8 kWh/mes):
 
-$$W_{\text{día}} = \frac{129}{30} = 4.3\ \text{kWh/día}$$
+$$W_{\text{día}} = \frac{124.8}{30} = 4.16\ \text{kWh/día}$$
 $$\text{Producción por panel} = 5.6 \times 0.55 \times 0.78 = 2.40\ \text{kWh/día}$$
-$$N = \left\lceil \frac{4.3}{2.40} \right\rceil = \lceil 1.79 \rceil = 2\ \text{paneles} = 1.10\ \text{kWp}$$
+$$N = \left\lceil \frac{4.16}{2.40} \right\rceil = \lceil 1.73 \rceil = 2\ \text{paneles} = 1.10\ \text{kWp}$$
 
 Es un **predimensionamiento**. La interconexión doméstica tiene un tope
 regulatorio y el balance neto se liquida por periodo de facturación, no instante
@@ -433,7 +597,46 @@ a instante.
 
 ---
 
-## 9. Tabla de constantes
+## 10. Histórico
+
+Vive en SQLite empotrado: sin red, sin permisos, sin almacenamiento externo.
+
+### 10.1 Racha de días
+
+Días consecutivos con al menos una sesión de ahorro. Se cuenta hacia atrás desde
+hoy, o desde ayer si hoy todavía no hay sesión — la racha no debe romperse antes
+de que el día termine. Si no hay sesión ni hoy ni ayer, la racha es cero.
+
+### 10.2 Resumen diario del sensor
+
+Guardar cada lectura llenaría la base sin aportar nada, porque lo que interesa es
+el perfil de luz del día. Se acumula una muestra por minuto y el promedio se
+recalcula de forma incremental, sin conservar las muestras individuales:
+
+$$\bar{E}_{n+1} = \frac{\bar{E}_n \cdot n + E_{\text{nueva}}}{n+1}$$
+
+También se conserva el máximo del día.
+
+### 10.3 Acumulados heredados
+
+Los tres contadores de la versión con SharedPreferences (energía, dinero,
+sesiones) no tienen fecha asociada, así que no pueden entrar a la tabla de
+sesiones sin ensuciar rachas, gráficas y comparaciones por periodo. Viven en una
+tabla aparte y se suman a los totales:
+
+$$W_{\text{total}} = \sum_{\text{sesiones}} W_i + W_{\text{legado}}$$
+
+### 10.4 Sellos de tiempo del catálogo
+
+Cada aparato guarda `creado_en` y `modificado_en`. No son metadatos decorativos:
+son lo que permite descartar un recibo cuyo periodo cruza un cambio de catálogo
+(candado 2 de §4.5). Los aparatos migrados de la versión anterior reciben una
+fecha centinela de 2000-01-01, porque usar la fecha de migración invalidaría
+todos los recibos anteriores a ella — justo los que el usuario tiene a la mano.
+
+---
+
+## 11. Tabla de constantes
 
 | Constante | Valor | Dónde vive | Fuente |
 |---|---|---|---|
@@ -442,6 +645,7 @@ a instante.
 | Umbral de salida de alerta | 250 lx | `SensorService` | Heurística (banda muerta) |
 | Persistencia de la alerta | 30 s | `SensorService` | Criterio de diseño |
 | Cooldown entre avisos | 30 min | `SensorService` | Criterio de diseño |
+| Intervalo de registro diario | 1 min | `SensorService` | Criterio de diseño |
 | Días por mes | 30 | `AppConstants` | Convención |
 | Meses por recibo | 2 | `AppConstants` | CFE factura bimestral |
 | IVA frontera | 8 % | `AppConstants` | Región fronteriza norte |
@@ -450,29 +654,33 @@ a instante.
 | HSP Tijuana | 5.6 | `AppConstants` | Recurso solar local |
 | Performance Ratio | 0.78 | `AppConstants` | Práctica de ingeniería FV |
 | Potencia del módulo | 0.55 kW | `AppConstants` | Módulo comercial |
+| Razón mínima de calibración | 0.4 | `CalibracionService` | Candado 1 |
+| Razón máxima de calibración | 2.5 | `CalibracionService` | Candado 1 |
+| $\alpha$ mínimo | 0.4 | `CalibracionService` | Cota inferior del ciclo |
+| Cobertura mínima para DAC real | 6 meses | `HistorialService` | Criterio de diseño |
 | Potencia de alumbrado | 40 W | configurable | Valor inicial |
 | Factores de uso | ver §3.1 | `TipoCarga` | Ciclos de trabajo típicos |
-| Tarifas y límites DAC | ver §4.2 | `TarifasCfe` | Acuerdos tarifarios CFE |
+| Tarifas y límites DAC | ver §5.2 | `TarifasCfe` | Acuerdos tarifarios CFE |
 
 ---
 
-## 10. Lo que la app **no** calcula
+## 12. Lo que la app **no** calcula
 
 Para que quede explícito en la documentación del proyecto:
 
 - No distingue luz natural de artificial *(fase D)*.
 - No usa la hora del día ni el amanecer/atardecer *(fase D)*.
 - No calibra el sensor contra un luxómetro patrón *(fase D)*.
-- No conoce el consumo real facturado: todo parte del catálogo declarado por el
-  usuario *(fase C: captura de recibos y calibración)*.
-- No calcula el promedio móvil real de 12 meses para DAC *(fase C)*.
+- No atribuye el consumo no identificado a aparatos concretos: sabe **cuánto**
+  falta, no **de qué** (§4.8).
 - No calcula el DSAP: lo copia el usuario, porque su fórmula es municipal.
-- No modela variación estacional del ciclo de trabajo de los compresores.
+- No modela variación dentro de una misma temporada, solo entre verano y fuera
+  de verano.
 - No actualiza precios por sí sola: es offline por diseño.
 
 ---
 
-## 11. Referencias
+## 13. Referencias
 
 1. **NOM-025-STPS-2008**, Condiciones de iluminación en los centros de trabajo.
    DOF 30/12/2008. Tabla 1, niveles mínimos de iluminación.
